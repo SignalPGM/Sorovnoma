@@ -1,0 +1,2 @@
+[deploy]
+startCommand = "python 'sorovnoma_bot (1).py'"
