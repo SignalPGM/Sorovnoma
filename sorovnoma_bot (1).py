@@ -74,9 +74,31 @@ OQITUVCHILAR = [
 ]
 
 # ─────────────────────────────────────────────
+# O'QITUVCHILAR BAHOLASH TIZIMI
+# ─────────────────────────────────────────────
+
+# Baholash tizimi (ballar)
+TUSHUNTIRISH_BALLAR = {
+    "tush_1": 4,  # Har doim
+    "tush_2": 3,  # Ko'pincha
+    "tush_3": 2,  # Kamdan-kam
+    "tush_4": 1,  # Umuman tushunarsiz
+}
+
+MUNOSABAT_BALLAR = {
+    "mun_1": 3,  # Juda yaxshi
+    "mun_2": 2,  # O'rtacha
+    "mun_3": 1,  # Qo'pol/Adolatsiz
+}
+
+# O'qituvchilar statistikasi
+OQITUVCHILAR_STATISTIKA = {}
+
+# ─────────────────────────────────────────────
 # HOLATLAR (ConversationHandler states)
 # ─────────────────────────────────────────────
 (
+    ASK_NAME,              # Ism va familiya so'rash
     SELECT_KURS,
     SELECT_GURUH,
     TEACHER_START,          # Birinchi savol: "dars o'tadimi?"
@@ -85,16 +107,17 @@ OQITUVCHILAR = [
     GENERAL_YETISHMAYAPTI,  # Savol 3 (ko'p tanlov)
     GENERAL_BAHO,           # Savol 4
     FINAL_COMMENT,          # Savol 5
-) = range(8)
+) = range(9)
 
 # ─────────────────────────────────────────────
 # YORDAMCHI FUNKSIYALAR
 # ─────────────────────────────────────────────
 
 def get_state(context: ContextTypes.DEFAULT_TYPE) -> dict:
-    """Foydalanuvchi holatini qaytaradi."""
+    """Foydalanuvchi holatini qaytarida."""
     if "survey" not in context.user_data:
         context.user_data["survey"] = {
+            "full_name": None,        # Ism va familiya
             "kurs": None,
             "guruh": None,
             "teacher_idx": 0,        # Hozirgi o'qituvchi indeksi
@@ -113,6 +136,67 @@ def current_teacher(context) -> tuple:
     if idx < len(OQITUVCHILAR):
         return OQITUVCHILAR[idx]
     return None, None
+
+
+# ─────────────────────────────────────────────
+# O'QITUVCHILAR STATISTIKASI FUNKSIYALARI
+# ─────────────────────────────────────────────
+
+def update_teacher_stats(teacher_name: str, teacher_fan: str, dars_bormi: bool, 
+                        tushuntirish: str = None, munosabat: str = None):
+    """O'qituvchi statistikasini yangilash."""
+    key = f"{teacher_name}_{teacher_fan}"
+    
+    if key not in OQITUVCHILAR_STATISTIKA:
+        OQITUVCHILAR_STATISTIKA[key] = {
+            "name": teacher_name,
+            "fan": teacher_fan,
+            "jami_baholar": 0,
+            "dars_bor_soni": 0,
+            "tushuntirish_ballari": [],
+            "munosabat_ballari": [],
+            "umumiy_ball": 0,
+            "baholangan_soni": 0
+        }
+    
+    stats = OQITUVCHILAR_STATISTIKA[key]
+    stats["jami_baholar"] += 1
+    
+    if dars_bormi:
+        stats["dars_bor_soni"] += 1
+        
+        if tushuntirish:
+            tush_ball = TUSHUNTIRISH_BALLAR.get(tushuntirish, 0)
+            stats["tushuntirish_ballari"].append(tush_ball)
+            
+        if munosabat:
+            mun_ball = MUNOSABAT_BALLAR.get(munosabat, 0)
+            stats["munosabat_ballari"].append(mun_ball)
+            
+        # Umumiy ballni hisoblash
+        tush_orta = sum(stats["tushuntirish_ballari"]) / len(stats["tushuntirish_ballari"]) if stats["tushuntirish_ballari"] else 0
+        mun_orta = sum(stats["munosabat_ballari"]) / len(stats["munosabat_ballari"]) if stats["munosabat_ballari"] else 0
+        stats["umumiy_ball"] = round((tush_orta + mun_orta) / 2, 2)
+        stats["baholangan_soni"] = len(stats["tushuntirish_ballari"])
+
+
+def get_teacher_rating(teacher_name: str, teacher_fan: str) -> dict:
+    """O'qituvchi reytingini olish."""
+    key = f"{teacher_name}_{teacher_fan}"
+    return OQITUVCHILAR_STATISTIKA.get(key, None)
+
+
+def get_top_teachers(limit: int = 5) -> list:
+    """Eng yaxshi o'qituvchilar ro'yxati."""
+    teachers_with_rating = []
+    
+    for key, stats in OQITUVCHILAR_STATISTIKA.items():
+        if stats["baholangan_soni"] > 0:  # Kamida 1 marta baholangan bo'lishi kerak
+            teachers_with_rating.append(stats)
+    
+    # Umumiy ball bo'yicha saralash
+    teachers_with_rating.sort(key=lambda x: x["umumiy_ball"], reverse=True)
+    return teachers_with_rating[:limit]
 
 
 def teachers_inline(teacher_name: str, fan: str) -> InlineKeyboardMarkup:
@@ -191,14 +275,25 @@ YETISHMAYAPTI_LABELS = {
 
 
 async def send_results(context: ContextTypes.DEFAULT_TYPE, user: object, s: dict):
-    """Natijalarni guruhga yuboradi."""
+    """Natijalarni guruhga yuboradi va statistikani yangilaydi."""
     now = datetime.now().strftime("%d.%m.%Y %H:%M")
+    
+    # Avval statistikani yangilaymiz
+    for td in s["teachers_data"]:
+        update_teacher_stats(
+            td["name"], 
+            td["fan"], 
+            td["dars_bormi"],
+            td.get("tushuntirish"),
+            td.get("munosabat")
+        )
     
     lines = [
         "📋 *YANGI SO'ROVNOMA NATIJASI*",
         f"🏫 Ilgor Kasbiy Mahorat Texnikumi",
         f"📅 Sana: {now}",
-        f"👤 Telegram: @{user.username or 'nomalum'} (ID: {user.id})",
+        f"👤 Talaba: *{s['full_name']}*",
+        f"📱 Telegram: @{user.username or 'nomalum'} (ID: {user.id})",
         f"📚 Kurs: {s['kurs']}  |  Guruh: {s['guruh']}",
         "",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
@@ -215,6 +310,12 @@ async def send_results(context: ContextTypes.DEFAULT_TYPE, user: object, s: dict
             mun  = MUNOSABAT_LABELS.get(td.get("munosabat", ""), "—")
             lines.append(f"   📖 Tushuntirish: {tush}")
             lines.append(f"   🤝 Munosabat: {mun}")
+            
+            # Joriy bahoni ko'rsatish
+            tush_ball = TUSHUNTIRISH_BALLAR.get(td.get("tushuntirish", ""), 0)
+            mun_ball = MUNOSABAT_BALLAR.get(td.get("munosabat", ""), 0)
+            joriy_ball = round((tush_ball + mun_ball) / 2, 1)
+            lines.append(f"   ⭐ Joriy baho: {joriy_ball}/3.5")
 
     lines += [
         "",
@@ -273,20 +374,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def begin_survey(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """So'rovnomani boshlash → Kurs tanlash."""
+    """So'rovnomani boshlash → Ism va familiya so'rash."""
     get_state(context)  # holatni initsializatsiya qilish
+    await update.message.reply_text(
+        "📝 *So'rovnomaga xush kelibsiz!*\n\n"
+        "Iltimos, to'liq ismingiz va familiyangizni kiriting:\n"
+        "_(Masalan: Aliyev Valijon)_",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return ASK_NAME
+
+
+async def ask_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ism va familiyani saqlash → Kurs tanlash."""
+    full_name = update.message.text.strip()
+    
+    # Minimal tekshiruv - kamida 2 so'z bo'lishi kerak
+    if len(full_name.split()) < 2:
+        await update.message.reply_text(
+            "❌ Iltimos, to'liq ism va familiyangizni kiriting:\n"
+            "_(Masalan: Aliyev Valijon)_",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return ASK_NAME
+    
+    s = get_state(context)
+    s["full_name"] = full_name
+    
     buttons = [[InlineKeyboardButton(k, callback_data=f"kurs_{k}")] for k in KURSLAR]
     await update.message.reply_text(
+        f"✅ Ism: *{full_name}*\n\n"
         "📚 *Qaysi kursdа o'qiysiz?*",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(buttons),
     )
-    # ReplyKeyboard ni olib tashlaymiz
-    await update.message.reply_text(
-        "Iltimos, kursni tanlang:",
-        reply_markup=ReplyKeyboardRemove(),
-    )
-    # Avvalgi reply markup ni o'chirish uchun
     return SELECT_KURS
 
 
@@ -518,6 +640,104 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────────────────────────────
+# STATISTIKA KOMANDALARI
+# ─────────────────────────────────────────────
+
+async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Umumiy statistikani ko'rsatish."""
+    if not OQITUVCHILAR_STATISTIKA:
+        await update.message.reply_text(
+            "📊 *STATISTIKA*\n\nHozircha ma'lumotlar yo'q.\n"
+            "So'rovnomalar to'plangach statistika paydo bo'ladi.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    lines = [
+        "📊 *O'QITUVCHILAR STATISTIKASI*",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        ""
+    ]
+    
+    # Faqat baholangan o'qituvchilar
+    baholangan_ustozlar = []
+    for key, stats in OQITUVCHILAR_STATISTIKA.items():
+        if stats["baholangan_soni"] > 0:
+            baholangan_ustozlar.append(stats)
+    
+    if not baholangan_ustozlar:
+        lines.append("Hozircha baholangan o'qituvchilar yo'q.")
+    else:
+        # Saralash (eng yuqori ball birinchi)
+        baholangan_ustozlar.sort(key=lambda x: x["umumiy_ball"], reverse=True)
+        
+        for i, stats in enumerate(baholangan_ustozlar, 1):
+            foiz = round((stats["dars_bor_soni"] / stats["jami_baholar"]) * 100) if stats["jami_baholar"] > 0 else 0
+            lines.append(f"{i}. *{stats['name']}* — _{stats['fan']}_")
+            lines.append(f"   ⭐ Reyting: {stats['umumiy_ball']}/3.5")
+            lines.append(f"   📈 Baholar: {stats['baholangan_soni']} marta")
+            lines.append(f"   ✅ Dars o'tish: {foiz}%")
+            lines.append("")
+    
+    text = "\n".join(lines)
+    
+    try:
+        await update.message.reply_text(
+            text,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        logger.error(f"Statistikani yuborishda xato: {e}")
+
+
+async def show_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Eng yaxshi 5 o'qituvchini ko'rsatish."""
+    top_teachers = get_top_teachers(5)
+    
+    if not top_teachers:
+        await update.message.reply_text(
+            "🏆 *TOP O'QITUVCHILAR*\n\n"
+            "Hozircha ma'lumotlar yo'q.\n"
+            "So'rovnomalar to'plangac reyting shakllanadi.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    lines = [
+        "🏆 *ENG YAXSHI 5 O'QITUVCHI*",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        ""
+    ]
+    
+    for i, stats in enumerate(top_teachers, 1):
+        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+        lines.append(f"{medal} *{stats['name']}* — _{stats['fan']}_")
+        lines.append(f"   ⭐ Reyting: {stats['umumiy_ball']}/3.5")
+        lines.append(f"   📈 Baholar: {stats['baholangan_soni']} marta")
+        
+        # Qo'shimcha ma'lumot
+        if stats["tushuntirish_ballari"]:
+            tush_orta = round(sum(stats["tushuntirish_ballari"]) / len(stats["tushuntirish_ballari"]), 1)
+            lines.append(f"   📖 Tushuntirish: {tush_orta}/4")
+        
+        if stats["munosabat_ballari"]:
+            mun_orta = round(sum(stats["munosabat_ballari"]) / len(stats["munosabat_ballari"]), 1)
+            lines.append(f"   🤝 Munosabat: {mun_orta}/3")
+        
+        lines.append("")
+    
+    text = "\n".join(lines)
+    
+    try:
+        await update.message.reply_text(
+            text,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        logger.error(f"Top reytingini yuborishda xato: {e}")
+
+
+# ─────────────────────────────────────────────
 # BOTNI YOQISH
 # ─────────────────────────────────────────────
 
@@ -530,6 +750,9 @@ def main():
             CommandHandler("start", start),
         ],
         states={
+            ASK_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, ask_name),
+            ],
             SELECT_KURS: [CallbackQueryHandler(select_kurs, pattern=r"^kurs_")],
             SELECT_GURUH: [CallbackQueryHandler(select_guruh, pattern=r"^guruh_")],
             TEACHER_START: [
@@ -557,6 +780,8 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv)
+    app.add_handler(CommandHandler("stat", show_stats))
+    app.add_handler(CommandHandler("top", show_top))
 
     logger.info("Bot ishga tushdi...")
     app.run_polling(drop_pending_updates=True)
