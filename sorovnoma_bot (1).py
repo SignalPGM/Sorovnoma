@@ -5,6 +5,8 @@ Ilgor Kasbiy Texnikum - So'rovnoma Bot
 
 import logging
 import asyncio
+import json
+import os
 from datetime import datetime
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup,
@@ -197,6 +199,80 @@ def get_top_teachers(limit: int = 5) -> list:
     return teachers_with_rating[:limit]
 
 
+# ─────────────────────────────────────────────
+# FAYLGA SAQLASH FUNKSIYALARI
+# ─────────────────────────────────────────────
+
+DATA_FILE = "survey_data.json"
+
+def save_survey_to_file(survey_data: dict, user_info: dict):
+    """So'rovnomani faylga saqlaydi."""
+    try:
+        # Avvalgi ma'lumotlarni yuklash
+        existing_data = []
+        if os.path.exists(DATA_FILE):
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                existing_data = json.load(f)
+        
+        # Yangi so'rovnomani qo'shish
+        new_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "date": datetime.now().strftime("%d.%m.%Y %H:%M"),
+            "user_info": {
+                "full_name": survey_data['full_name'],
+                "telegram_username": user_info.get('username', 'nomalum'),
+                "telegram_id": user_info.get('id', 0),
+                "kurs": survey_data['kurs'],
+                "guruh": survey_data['guruh']
+            },
+            "teachers_data": survey_data['teachers_data'],
+            "yetishmayapti": survey_data['yetishmayapti'],
+            "baho": survey_data['baho']
+        }
+        
+        existing_data.append(new_entry)
+        
+        # Faylga saqlash
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(existing_data, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"So'rovnomani faylga saqlandi: {survey_data['full_name']}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"So'rovnomani faylga saqlashda xato: {e}")
+        return False
+
+
+def save_statistics_to_file():
+    """Statistikani faylga saqlaydi."""
+    try:
+        stats_file = "statistics.json"
+        with open(stats_file, 'w', encoding='utf-8') as f:
+            json.dump(OQITUVCHILAR_STATISTIKA, f, ensure_ascii=False, indent=2)
+        logger.info("Statistika faylga saqlandi")
+        return True
+    except Exception as e:
+        logger.error(f"Statistikani faylga saqlashda xato: {e}")
+        return False
+
+
+def load_statistics_from_file():
+    """Statistikani fayldan yuklaydi."""
+    try:
+        stats_file = "statistics.json"
+        if os.path.exists(stats_file):
+            with open(stats_file, 'r', encoding='utf-8') as f:
+                loaded_stats = json.load(f)
+                OQITUVCHILAR_STATISTIKA.clear()
+                OQITUVCHILAR_STATISTIKA.update(loaded_stats)
+            logger.info("Statistika fayldan yuklandi")
+            return True
+    except Exception as e:
+        logger.error(f"Statistikani fayldan yuklashda xato: {e}")
+    return False
+
+
 def teachers_inline(teacher_name: str, fan: str) -> InlineKeyboardMarkup:
     """'Sizga ... dars o'tadimi?' uchun tugmalar."""
     return InlineKeyboardMarkup([[
@@ -285,6 +361,15 @@ async def send_results(context: ContextTypes.DEFAULT_TYPE, user: object, s: dict
             td.get("tushuntirish"),
             td.get("munosabat")
         )
+    
+    # So'rovnomani faylga saqlaymiz
+    save_survey_to_file(s, {
+        'username': user.username,
+        'id': user.id
+    })
+    
+    # Statistikani ham faylga saqlaymiz
+    save_statistics_to_file()
     
     lines = [
         "📋 *YANGI SO'ROVNOMA NATIJASI*",
@@ -719,6 +804,9 @@ async def show_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─────────────────────────────────────────────
 
 def main():
+    # Avvalgi statistikani fayldan yuklash
+    load_statistics_from_file()
+    
     app = Application.builder().token(TOKEN).build()
 
     conv = ConversationHandler(
