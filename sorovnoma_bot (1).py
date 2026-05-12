@@ -106,8 +106,7 @@ OQITUVCHILAR_STATISTIKA = {}
     TEACHER_MUNOSABAT,      # Savol 2
     GENERAL_YETISHMAYAPTI,  # Savol 3 (ko'p tanlov)
     GENERAL_BAHO,           # Savol 4
-    FINAL_COMMENT,          # Savol 5
-) = range(9)
+) = range(8)
 
 # ─────────────────────────────────────────────
 # YORDAMCHI FUNKSIYALAR
@@ -124,7 +123,6 @@ def get_state(context: ContextTypes.DEFAULT_TYPE) -> dict:
             "teachers_data": [],     # [ {name, fan, dars_bormi, tushuntirish, munosabat} ]
             "yetishmayapti": [],
             "baho": None,
-            "comment": None,
         }
     return context.user_data["survey"]
 
@@ -333,14 +331,6 @@ async def send_results(context: ContextTypes.DEFAULT_TYPE, user: object, s: dict
         lines.append("❗ Yetishmayotgan narsalar: belgilanmagan")
 
     lines.append(f"⭐ Ta'lim sifati bahosi: *{s['baho']} / 10*")
-
-    lines += [
-        "",
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        "💬 *YAKUNIY FIKR:*",
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        s.get("comment") or "_(fikr yozilmagan)_",
-    ]
 
     text = "\n".join(lines)
 
@@ -594,7 +584,7 @@ async def general_yetishmayapti_callback(update: Update, context: ContextTypes.D
 
 
 async def general_baho_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Baho saqlash → Yakuniy fikr."""
+    """Baho saqlash → So'rovnomani tugatish."""
     query = update.callback_query
     await query.answer()
     s = get_state(context)
@@ -604,31 +594,18 @@ async def general_baho_callback(update: Update, context: ContextTypes.DEFAULT_TY
     stars = "⭐" * baho
     await query.edit_message_text(
         f"✅ Ta'lim sifati bahosi: *{baho}/10* {stars}\n\n"
-        "5️⃣ *Texnikum ma'muriyatiga yoki o'qituvchilarga*\n"
-        "o'z fikr, taklif yoki shikoyatingizni yozib qoldiring:\n\n"
-        "_(Fikr yozmasangiz ham bo'ladi — faqat «—» yuboring)_",
-        parse_mode=ParseMode.MARKDOWN,
-    )
-    return FINAL_COMMENT
-
-
-async def final_comment(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Yakuniy fikr → Natijani saqlash va yuborish."""
-    s = get_state(context)
-    s["comment"] = update.message.text.strip()
-
-    await update.message.reply_text(
         "✅ *So'rovnoma yakunlandi!*\n\n"
-        "Fikr-mulohazalaringiz uchun katta rahmat! 🙏\n"
+        "Javoblaringiz uchun katta rahmat! 🙏\n"
         "Sizning javoblaringiz texnikum sifatini yaxshilashga xizmat qiladi.\n\n"
         "Yana boshqatdan o'tkazish uchun /start buyrug'ini bosing.",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=ReplyKeyboardRemove(),
     )
 
     # Guruhga yuborish
     await send_results(context, update.effective_user, s)
     return ConversationHandler.END
+
+
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -769,9 +746,6 @@ def main():
             ],
             GENERAL_BAHO: [
                 CallbackQueryHandler(general_baho_callback, pattern=r"^baho_"),
-            ],
-            FINAL_COMMENT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, final_comment),
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
